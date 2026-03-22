@@ -209,21 +209,6 @@ On new session — last 10 messages loaded from Supabase into context
 
 ---
 
-## Current Restaurant Data
-
-| Restaurant | Type | Status |
-|---|---|---|
-| Chaska Indian Street Food | Indian Street Food | Live — 44 dishes |
-| Pizza Garden | Italian | Seed data |
-| Protein Kitchen | Healthy | Seed data |
-| Taco Fiesta | Mexican | Seed data |
-| Healthy Bites | Salads | Seed data |
-| Bistro Central | European | Seed data |
-| Burger Barn | Fast Food | Seed data |
-| Spice Route | Indian | Seed data |
-| Green Bowl | Vegan | Seed data |
-
----
 
 ## Roadmap
 
