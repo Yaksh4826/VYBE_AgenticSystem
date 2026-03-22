@@ -4,17 +4,16 @@ load_dotenv()
 from langchain_groq import ChatGroq
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage, AIMessage
+from langgraph.checkpoint.memory import InMemorySaver          # ← correct
 
 from tools.search_food import search_food
 from tools.get_nearby import get_nearby_restaurants
 from db.supabase_client import supabase
 
 
-
+# ── 1. LLM ────────────────────────────────────────────────────────────────────
 llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
 
-
-# Prompt of the agent
 
 # ── 2. SYSTEM PROMPT ──────────────────────────────────────────────────────────
 SYSTEM_PROMPT = """
@@ -25,10 +24,11 @@ protein, group size, or location.
 
 ## How to use your tools
 - Always call search_food for any food or dish related query.
-- Call get_nearby_restaurants when the user mentions location, 
-  "near me", or "nearby". Only show dishes from restaurants in both results.
-- If the user refines a previous request remember the earlier context 
-  and adjust your search accordingly.
+- For vegan requests use is_vegan=true
+- For gluten-free use exclude_allergen="gluten"
+- For nut-free use exclude_allergen="nuts"
+- Call get_nearby_restaurants when the user mentions location or "near me".
+- If the user refines a previous request remember the earlier context.
 
 ## How to respond
 - Keep responses short and friendly.
@@ -41,51 +41,48 @@ Default coordinates if not provided: lat=43.8971, lng=-78.8658
 """
 
 
+# ── 3. MEMORY ─────────────────────────────────────────────────────────────────
+# InMemorySaver handles short-term memory per thread_id automatically.
+# We still save to Supabase separately for persistence across restarts.
 
-# ── 3. BUILD AGENT ────────────────────────────────────────────────────────────
+checkpointer = InMemorySaver()
 
+
+# ── 4. BUILD AGENT ────────────────────────────────────────────────────────────
 agent = create_agent(
     model=llm,
     tools=[search_food, get_nearby_restaurants],
-    prompt=SYSTEM_PROMPT,
+    system_prompt=SYSTEM_PROMPT,
+    checkpointer=checkpointer,
 )
 
 
+# ── 5. LOAD HISTORY FROM SUPABASE ─────────────────────────────────────────────
+# On app restart, InMemorySaver is empty.
+# This loads past messages from Supabase back into the checkpointer
+# so the agent remembers conversations even after a restart.
 
-
-# ── 4. LOAD HISTORY FROM SUPABASE ─────────────────────────────────────────────
-# We fetch the last 10 messages for this thread from Supabase.
-# They come back as raw dicts so we convert them into LangChain
-# message objects (HumanMessage / AIMessage) that the agent understands.
-# Limiting to 10 keeps the context window small and costs low.
-
-
-def load_history(thread_id:str)->list:
+def load_history(thread_id: str) -> list:
     response = (
-        supabase.from_("chat_messages")
+        supabase
+        .from_("chat_messages")
         .select("role, content")
-         .eq("thread_id", thread_id)
-        .order("created_at", desc=False)   # oldest first
+        .eq("thread_id", thread_id)
+        .order("created_at", desc=False)
         .limit(10)
         .execute()
-
     )
 
-
     messages = []
-    for res in response.data:
-        if res['role'] == 'user':
-            messages.append(HumanMessage(content=res['content']))
-        elif res['role'] == "assistant":
-            messages.appned(AIMessage(content = res['content']))    
+    for row in response.data:
+        if row["role"] == "user":
+            messages.append(HumanMessage(content=row["content"]))
+        elif row["role"] == "assistant":
+            messages.append(AIMessage(content=row["content"]))
     return messages
 
 
-# ── 5. SAVE MESSAGE TO SUPABASE ───────────────────────────────────────────────
-# After every exchange we write both the user message and the
-# assistant reply to Supabase as separate rows.
-# This is what makes memory persist across restarts.
-
+# ── 6. SAVE MESSAGE TO SUPABASE ───────────────────────────────────────────────
 def save_message(thread_id: str, role: str, content: str):
     supabase.from_("chat_messages").insert({
         "thread_id": thread_id,
@@ -94,35 +91,18 @@ def save_message(thread_id: str, role: str, content: str):
     }).execute()
 
 
+# ── 7. CHAT FUNCTION ──────────────────────────────────────────────────────────
+def chat(user_message: str, thread_id: str = "default") -> str:
+    config = {"configurable": {"thread_id": thread_id}}
 
+    response = agent.invoke(
+        {"messages": [{"role": "user", "content": user_message}]},
+        config=config,
+    )
 
-# ── 6. CHAT FUNCTION ──────────────────────────────────────────────────────────
-# This is the main function your app calls.
-# Flow:
-#   1. Load history from Supabase
-#   2. Pass history + new message to agent
-#   3. Save user message to Supabase
-#   4. Save agent reply to Supabase
-#   5. Return the reply
+    reply = response["messages"][-1].content
 
-
-def chat(user_message:str, thread_id : str = "default")->str:
-    history = load_history(thread_id)   #  Loading past history
-
-    # invoking the agent
-    response =  agent.invoke(input = user_message, chat_history = history)
-
-    reply = response['output']
-
-
-    # persist both sides of the exchange to Supabase
     save_message(thread_id, "user", user_message)
     save_message(thread_id, "assistant", reply)
 
     return reply
-
-
-
-
-    
-
