@@ -1,18 +1,55 @@
-from tools.search_food import search_food
-from tools.get_nearby import get_nearby_restaurants
-# ── TEST A: Call the tool directly (no LLM involved) ─────────────────────────
-# Great for checking your Supabase connection and query logic first.
-# If this fails, the problem is in the tool or DB — not the agent.
+from dotenv import load_dotenv
+load_dotenv()
 
-# ── TEST A: Direct tool call ──────────────────────────────────────────────────
-print("=" * 50)
-print("DIRECT NEARBY TOOL TEST")
-print("=" * 50)
+from agents.food_discovery_agent import chat
 
-# Using Oshawa, Ontario coordinates for testing
-result = get_nearby_restaurants.invoke({
-    "user_lat": 43.8971,
-    "user_lng": -78.8658,
-    "radius_km": 5.0
-})
-print(result)
+
+def run_conversation(thread_id: str, messages: list[str]):
+    print(f"\n{'=' * 50}")
+    print(f"SESSION: {thread_id}")
+    print('=' * 50)
+
+    for message in messages:
+        print(f"\nYou : {message}")
+        response = chat(message, thread_id=thread_id)
+        print(f"VYBE: {response}")
+        print("-" * 40)
+
+
+if __name__ == "__main__":
+
+    # ── TEST 1: Basic food queries ─────────────────────────────────────────
+    run_conversation(
+        thread_id="user_001",
+        messages=[
+            "I'm craving something cheesy",
+            "Make it under $15",              # agent should remember cheesy
+            "Which one has the least calories?",  # agent should remember both
+        ]
+    )
+
+    # ── TEST 2: Diet + budget ──────────────────────────────────────────────
+    run_conversation(
+        thread_id="user_002",
+        messages=[
+            "Show me vegan food under 500 calories",
+            "Any of those under $12?",        # agent should remember vegan
+        ]
+    )
+
+    # ── TEST 3: High protein near me ──────────────────────────────────────
+    run_conversation(
+        thread_id="user_003",
+        messages=[
+            "What high protein meals are near me?",
+            "Show me only the ones under $20",
+        ]
+    )
+
+    # ── TEST 4: Group order ────────────────────────────────────────────────
+    run_conversation(
+        thread_id="user_004",
+        messages=[
+            "I need food for a party of 20 people",
+        ]
+    )
