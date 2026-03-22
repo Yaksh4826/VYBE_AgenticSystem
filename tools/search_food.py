@@ -5,7 +5,6 @@ import json
 from datetime import datetime
 from db.supabase_client import supabase
 
-
 class SearchFoodInput(BaseModel):
     query: Optional[str] = None
     max_price: Optional[float] = None
@@ -13,9 +12,10 @@ class SearchFoodInput(BaseModel):
     min_protein: Optional[float] = None
     group_size: Optional[int] = None
     open_now: Optional[bool] = None
-    exclude_allergen: Optional[str] = None    # ← replaces diet e.g. "gluten"
-    is_vegan: Optional[bool] = None           # ← simple bool Groq handles fine
-
+    exclude_allergen: Optional[str] = None
+    is_vegan: Optional[bool] = None
+    is_vegetarian: Optional[bool] = None    # ← new
+    is_halal: Optional[bool] = None         # ← new
 
 @tool(args_schema=SearchFoodInput)
 def search_food(
@@ -27,6 +27,8 @@ def search_food(
     open_now: Optional[bool] = None,
     exclude_allergen: Optional[str] = None,
     is_vegan: Optional[bool] = None,
+    is_vegetarian: Optional[bool] = None,    # ← new
+    is_halal: Optional[bool] = None 
 ) -> str:
     """
     Search for food dishes based on the user's request.
@@ -35,15 +37,16 @@ def search_food(
     """
 
     q = (
-        supabase
-        .from_("food_dishes")
-        .select("""
-            id, name, price, calories, proteins_g,
-            allergens, spicy_level,
-            restaurants ( id, name, opening_time, closing_time )
-        """)
-        .eq("is_available", True)
-    )
+    supabase
+    .from_("food_dishes")
+    .select("""
+        id, name, price, calories, proteins_g,
+        allergens, spicy_level,
+        is_vegetarian, is_halal,
+        restaurants ( id, name, opening_time, closing_time )
+    """)
+    .eq("is_available", True)
+)
 
     if max_price is not None:
         q = q.lte("price", max_price)
@@ -65,6 +68,11 @@ def search_food(
     if is_vegan:
         for allergen in ["dairy", "eggs", "fish", "meat"]:
             q = q.not_.contains("allergens", [allergen])
+    if is_vegetarian:
+        q = q.eq("is_vegetarian", True)
+
+    if is_halal:
+        q = q.eq("is_halal", True)
 
     response = q.limit(10).execute()
 
@@ -88,12 +96,14 @@ def search_food(
     for dish in results:
         restaurant_name = dish["restaurants"]["name"] if dish.get("restaurants") else "Unknown"
         formatted.append({
-            "dish": dish["name"],
-            "restaurant": restaurant_name,
-            "price": f"${dish['price']}",
-            "calories": dish.get("calories", "N/A"),
-            "protein_g": dish.get("proteins_g", "N/A"),
-            "spicy_level": dish.get("spicy_level", 0),
-        })
+    "dish": dish["name"],
+    "restaurant": restaurant_name,
+    "price": f"${dish['price']}",
+    "calories": dish.get("calories", "N/A"),
+    "protein_g": dish.get("proteins_g", "N/A"),
+    "spicy_level": dish.get("spicy_level", 0),
+    "is_halal": dish.get("is_halal", False),          # ← add
+    "is_vegetarian": dish.get("is_vegetarian", False), # ← add
+})
 
     return json.dumps(formatted, indent=2)
